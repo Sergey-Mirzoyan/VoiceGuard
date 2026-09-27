@@ -80,10 +80,9 @@ def apply_pcm_plc(
                 actual_fade = prev_end - prev_start
                 if actual_fade > 0:
                     alpha = np.linspace(0.0, 1.0, actual_fade, dtype=samples.dtype)
-                    out[start : start + actual_fade] = (
-                        (1.0 - alpha) * out[start - actual_fade : start]
-                        + alpha * concealed[:actual_fade]
-                    )
+                    out[start : start + actual_fade] = (1.0 - alpha) * out[
+                        start - actual_fade : start
+                    ] + alpha * concealed[:actual_fade]
                     out[start + actual_fade : end] = concealed[actual_fade:]
                 else:
                     out[start:end] = concealed

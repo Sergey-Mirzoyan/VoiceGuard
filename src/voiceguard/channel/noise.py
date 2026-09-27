@@ -61,9 +61,7 @@ def _load_background_noise(
     if not noise_dir.is_dir():
         return None
 
-    noise_files = sorted(
-        list(noise_dir.glob("*.wav")) + list(noise_dir.glob("*.flac"))
-    )
+    noise_files = sorted(list(noise_dir.glob("*.wav")) + list(noise_dir.glob("*.flac")))
     if not noise_files:
         return None
 

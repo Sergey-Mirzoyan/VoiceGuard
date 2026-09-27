@@ -28,7 +28,15 @@ class ChannelSpec:
 
     AMR_NB_BITRATES: tuple[float, ...] = (4.75, 5.15, 5.9, 6.7, 7.4, 7.95, 10.2, 12.2)
     AMR_WB_BITRATES: tuple[float, ...] = (
-        6.6, 8.85, 12.65, 14.25, 15.85, 18.25, 19.85, 23.05, 23.85
+        6.6,
+        8.85,
+        12.65,
+        14.25,
+        15.85,
+        18.25,
+        19.85,
+        23.05,
+        23.85,
     )
     ALLOWED_CODECS: tuple[str, ...] = ("clean", "g711a", "g711u", "amrnb", "amrwb")
 

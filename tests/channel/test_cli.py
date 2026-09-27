@@ -18,9 +18,7 @@ def test_channel_batch_cli(tmp_path: Path) -> None:
     data_dir.mkdir()
 
     sr = 16000
-    sine = (0.5 * np.sin(2 * np.pi * 440.0 * np.linspace(0, 0.5, int(sr * 0.5)))).astype(
-        np.float32
-    )
+    sine = (0.5 * np.sin(2 * np.pi * 440.0 * np.linspace(0, 0.5, int(sr * 0.5)))).astype(np.float32)
 
     path1 = audio_dir / "clip_1.flac"
     path2 = audio_dir / "clip_2.flac"
