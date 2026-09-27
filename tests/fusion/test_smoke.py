@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import math
-import pytest
 
-from voiceguard.fusion.calibrator import LLRCalibrator, SPRT
+from voiceguard.fusion.calibrator import SPRT, LLRCalibrator
 
 
 def test_sprt_thresholds() -> None:
@@ -66,3 +65,7 @@ def test_calibrator_fit() -> None:
     llr_spoof = cal.llr(2.0, 3.5)
     llr_live  = cal.llr(-2.0, 0.1)
     assert llr_spoof > llr_live
+
+    cal1 = LLRCalibrator()
+    cal1.fit(s1, labels=y)
+    assert cal1.llr(2.0) > cal1.llr(-2.0)

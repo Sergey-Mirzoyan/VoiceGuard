@@ -43,7 +43,7 @@ def test_default_config() -> None:
         "amrnb_12.2+loss3",
     ]
 
-    assert cfg.fusion.sprt_alpha == 0.001
+    assert cfg.fusion.sprt_alpha == 0.01
     assert cfg.fusion.sprt_beta == 0.05
     assert cfg.fusion.t_max_s == 30.0
 

@@ -37,7 +37,7 @@ channel:
     p: 0.05
     r: 0.5
 fusion:
-  sprt_alpha: 0.001       # цель для демо; продуктовая цель 1e-4
+  sprt_alpha: 0.01       # демо (было 0.001); продуктовая цель 1e-4
   sprt_beta: 0.05
   t_max_s: 30
 engine:

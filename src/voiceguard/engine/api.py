@@ -12,7 +12,6 @@ from __future__ import annotations
 import io
 import json
 import logging
-import struct
 from pathlib import Path
 from typing import Any
 
@@ -62,30 +61,45 @@ def _load_audio(data: bytes, filename: str = "") -> tuple[np.ndarray, int]:
     except Exception:
         pass
 
-    # Try librosa for mp3/m4a/ogg/webm
-    try:
-        import librosa
+    # m4a/aac/webm/opus etc.: decode with ffmpeg to 16 kHz mono float32
+    import shutil
+    import subprocess
 
-        buf = io.BytesIO(data)
-        samples, sr = librosa.load(buf, sr=16000, mono=True)
-        return samples.astype(np.float32), sr
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Unsupported audio format: {exc}") from exc
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Формат не поддерживается без ffmpeg (brew install ffmpeg). "
+            "Без него работают WAV, MP3, OGG, FLAC.",
+        )
+    proc = subprocess.run(
+        [ffmpeg, "-v", "error", "-i", "pipe:0"]
+        + ["-f", "f32le", "-ac", "1", "-ar", "16000", "pipe:1"],
+        input=data,
+        capture_output=True,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        err = proc.stderr.decode(errors="replace").strip()[-300:]
+        raise HTTPException(status_code=400, detail=f"Unsupported audio format: {err}")
+    return np.frombuffer(proc.stdout, dtype=np.float32).copy(), 16000
 
 
 def _resample_to_16k(samples: np.ndarray, sr: int) -> np.ndarray:
     if sr == 16000:
         return samples
     try:
-        from scipy.signal import resample_poly
         from math import gcd
 
+        from scipy.signal import resample_poly
+
         g = gcd(16000, sr)
-        return resample_poly(samples, 16000 // g, sr // g).astype(np.float32)
+        return np.asarray(resample_poly(samples, 16000 // g, sr // g), dtype=np.float32)
     except Exception:
         import librosa
 
-        return librosa.resample(samples, orig_sr=sr, target_sr=16000).astype(np.float32)
+        return np.asarray(
+            librosa.resample(samples, orig_sr=sr, target_sr=16000), dtype=np.float32
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +158,8 @@ async def passport() -> JSONResponse:
 
 @app.post("/v1/analyze")
 async def analyze(
-    file: UploadFile = File(...),
-    channel: str = Form(default="clean"),
+    file: UploadFile = File(...),  # noqa: B008
+    channel: str = Form(default="clean"),  # noqa: B008
 ) -> JSONResponse:
     """Analyze an uploaded audio file.
 
@@ -199,6 +213,28 @@ async def analyze(
     )
 
 
+def _make_vad(aggressiveness: int) -> Any:
+    """Create webrtcvad.Vad, or None if unavailable (then every frame is speech)."""
+    import sys
+    import types
+
+    # webrtcvad imports pkg_resources only for its version; newer setuptools drop it
+    if "pkg_resources" not in sys.modules:
+        try:
+            import pkg_resources  # type: ignore[import-not-found]  # noqa: F401
+        except ImportError:
+            dummy = types.ModuleType("pkg_resources")
+            dummy.get_distribution = lambda n: types.SimpleNamespace(version="2.0.10")  # type: ignore[attr-defined]
+            sys.modules["pkg_resources"] = dummy
+    try:
+        import webrtcvad
+
+        return webrtcvad.Vad(aggressiveness)
+    except Exception as exc:
+        logger.warning("webrtcvad unavailable (%s), treating all frames as speech", exc)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # WS /v1/stream
 # ---------------------------------------------------------------------------
@@ -214,9 +250,8 @@ async def stream(websocket: WebSocket, channel: str = "clean") -> None:
     await websocket.accept()
 
     from voiceguard.config import load_config
-    from voiceguard.dsp.vad import compute_vad_mask
     from voiceguard.engine.stream_engine import StreamEngine
-    from voiceguard.types import AudioClip, Segment
+    from voiceguard.types import Segment
 
     cfg = load_config()
     engine = StreamEngine(cfg=cfg, channel=channel, models_dir=_MODELS_DIR)
@@ -226,43 +261,37 @@ async def stream(websocket: WebSocket, channel: str = "clean") -> None:
     FRAME_LEN = SR * FRAME_MS // 1000  # 320 samples
     SEG_FRAMES = 50  # 1 s = 50 * 20 ms frames
 
-    buffer_pcm: list[np.ndarray] = []  # raw frames
+    pending = np.zeros(0, dtype=np.float32)  # samples not yet forming a full frame
     speech_frames: list[np.ndarray] = []
     t_elapsed = 0.0
+    vad = _make_vad(cfg.vad.aggressiveness)
 
     try:
         while True:
             raw = await websocket.receive_bytes()
-            if not raw:
+            if len(raw) < 2:
                 continue
 
-            # Parse PCM16 samples
-            n_samples = len(raw) // 2
-            if n_samples == 0:
-                continue
-            pcm16 = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            # Parse PCM16 samples; browsers send small chunks (e.g. 128 samples),
+            # so carry the remainder over to the next message.
+            pcm16 = np.frombuffer(raw[: len(raw) // 2 * 2], dtype=np.int16)
+            pending = np.concatenate([pending, pcm16.astype(np.float32) / 32768.0])
 
             # Process in frame chunks
             offset = 0
-            while offset + FRAME_LEN <= len(pcm16):
-                frame = pcm16[offset : offset + FRAME_LEN]
+            while offset + FRAME_LEN <= len(pending):
+                frame = pending[offset : offset + FRAME_LEN]
                 offset += FRAME_LEN
 
                 # VAD check
-                frame_pcm16 = (frame * 32767).astype(np.int16)
-                try:
-                    import webrtcvad
-                    import sys, types as _types
-
-                    if "pkg_resources" not in sys.modules:
-                        _dummy = _types.ModuleType("pkg_resources")
-                        _dummy.get_distribution = lambda n: _types.SimpleNamespace(version="2.0.10")  # type: ignore[attr-defined]
-                        sys.modules["pkg_resources"] = _dummy
-
-                    vad = webrtcvad.Vad(cfg.vad.aggressiveness)
-                    is_speech = vad.is_speech(frame_pcm16.tobytes(), SR)
-                except Exception:
-                    is_speech = True  # assume speech on error
+                if vad is None:
+                    is_speech = True
+                else:
+                    frame_pcm16 = (frame * 32767).astype(np.int16)
+                    try:
+                        is_speech = vad.is_speech(frame_pcm16.tobytes(), SR)
+                    except Exception:
+                        is_speech = True  # assume speech on error
 
                 if is_speech:
                     speech_frames.append(frame)
@@ -294,6 +323,8 @@ async def stream(websocket: WebSocket, channel: str = "clean") -> None:
                             "verdict": ws_result.verdict,
                         }
                     )
+
+            pending = pending[offset:]
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")

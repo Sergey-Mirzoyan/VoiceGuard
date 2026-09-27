@@ -8,7 +8,6 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import queue
-import threading
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +48,9 @@ class StreamEngine:
         self.cfg = cfg or load_config()
         self.channel = channel
         self.models_dir = Path(models_dir)
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="d2")
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="d2"
+        )
 
         self._d1_model: Any = None
         self._d2_ref: Any = None
@@ -153,10 +154,12 @@ class StreamEngine:
             logger.debug("D2 background error: %s", exc)
             return None
 
-    def process_segment(self, seg: Segment) -> WindowScore:
+    def process_segment(self, seg: Segment, wait_d2: bool = False) -> WindowScore:
         """Process one 1-second segment, return WindowScore.
 
-        D1 runs synchronously, D2 runs in background executor.
+        D1 runs synchronously. D2 runs in the background executor and its s2 is
+        used with a delay (streaming), or, with wait_d2=True, is awaited and
+        applied to this same segment (file analysis).
         """
         from voiceguard.d1.detector import predict_logit
 
@@ -177,19 +180,23 @@ class StreamEngine:
         check_ids = REDUCED_D2_CHECKS if use_reduced else (
             self._d2_ref.check_ids if self._d2_ref else REDUCED_D2_CHECKS
         )
-        future = self._executor.submit(self._compute_d2_bg, seg, check_ids)
-        self._pending_d2[idx] = future
-
-        # Try to get previous D2 result (non-blocking)
         s2: float | None = None
-        for past_idx in list(self._pending_d2.keys()):
-            if past_idx < idx:
-                f = self._pending_d2[past_idx]
-                if f.done():
-                    res = f.result()
-                    if res is not None:
-                        s2 = res.s2
-                    del self._pending_d2[past_idx]
+        if wait_d2:
+            res = self._compute_d2_bg(seg, check_ids)
+            if res is not None:
+                s2 = res.s2
+        else:
+            self._pending_d2[idx] = self._executor.submit(self._compute_d2_bg, seg, check_ids)
+
+            # Streaming: take the latest finished D2 result of an earlier segment
+            for past_idx in list(self._pending_d2.keys()):
+                if past_idx < idx:
+                    f = self._pending_d2[past_idx]
+                    if f.done():
+                        res = f.result()
+                        if res is not None:
+                            s2 = res.s2
+                        del self._pending_d2[past_idx]
 
         # LLR
         _s1 = s1 if s1 is not None else 0.0
@@ -242,7 +249,7 @@ class StreamEngine:
                 from voiceguard.channel.spec import ChannelSpec
 
                 spec = ChannelSpec.parse(ch)
-                clip = apply(clip, spec)
+                clip = apply(clip, spec, seed=42)
             except Exception as exc:
                 logger.warning("Channel apply failed: %s, using clean", exc)
 
@@ -251,7 +258,7 @@ class StreamEngine:
         segs = do_segment(clip, self.cfg)
         results: list[WindowScore] = []
         for seg in segs:
-            ws = self.process_segment(seg)
+            ws = self.process_segment(seg, wait_d2=True)
             results.append(ws)
 
         # Wait for all pending D2

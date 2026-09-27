@@ -33,25 +33,34 @@ class LLRCalibrator:
     def fit(
         self,
         s1_scores: list[float],
-        s2_scores: list[float],
-        labels: list[int],
+        s2_scores: list[float] | None = None,
+        labels: list[int] | None = None,
         seed: int = 42,
-    ) -> "LLRCalibrator":
+    ) -> LLRCalibrator:
         """Fit the calibrator on calibration data.
 
         Args:
             s1_scores: D1 logits.
-            s2_scores: D2 s2 values.
+            s2_scores: D2 s2 values (optional; if None or empty, calibrate on s1 only).
             labels: 0=live, 1=spoof.
             seed: Random seed.
         """
         from sklearn.linear_model import LogisticRegression
 
-        X = np.column_stack([s1_scores, s2_scores])
+        if labels is None:
+            raise ValueError("labels must be provided to LLRCalibrator.fit")
+
+        if s2_scores is not None and len(s2_scores) > 0:
+            X = np.column_stack([s1_scores, s2_scores])
+        else:
+            X = np.array(s1_scores).reshape(-1, 1)
+
         y = np.array(labels)
 
         if len(np.unique(y)) < 2:
-            logger.warning("LLRCalibrator: only one class in training data, using trivial calibrator")
+            logger.warning(
+                "LLRCalibrator: only one class in training data, using trivial calibrator"
+            )
             self._clf = None
             return self
 
@@ -60,13 +69,18 @@ class LLRCalibrator:
         self._clf = clf
         return self
 
-    def llr(self, s1: float, s2: float) -> float:
+    def llr(self, s1: float, s2: float = 0.0) -> float:
         """Compute log-likelihood-ratio for a single (s1, s2) pair."""
         if self._clf is None:
             # Fallback: simple average of scores
             return float(s1 + s2) / 2
 
-        X = np.array([[s1, s2]])
+        n_feats = getattr(self._clf, "n_features_in_", 2)
+        if n_feats == 1:
+            X = np.array([[s1]])
+        else:
+            X = np.array([[s1, s2]])
+
         prob = self._clf.predict_proba(X)[0]  # [p_live, p_spoof]
         p_spoof = float(prob[1])
         p_live = float(prob[0])
@@ -89,7 +103,7 @@ class LLRCalibrator:
         logger.info("Calibrator saved to %s", path)
 
     @classmethod
-    def load(cls, path: str | Path) -> "LLRCalibrator":
+    def load(cls, path: str | Path) -> LLRCalibrator:
         import joblib
 
         return joblib.load(path)  # type: ignore[no-any-return]

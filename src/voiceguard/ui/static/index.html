@@ -373,7 +373,7 @@
     <div class="card">
       <div class="card-title" data-ru="Загрузка аудио" data-en="Audio Upload">Загрузка аудио</div>
       <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
-        <input type="file" id="file-input" accept=".wav,.mp3,.m4a,.ogg,.webm" onchange="onFileSelected(event)" />
+        <input type="file" id="file-input" accept=".wav,.mp3,.m4a,.ogg,.webm,.flac,.aac,.opus" onchange="onFileSelected(event)" />
         <div class="dropzone-icon">🎵</div>
         <div class="dropzone-text" id="dz-text" data-ru="Перетащите файл или нажмите. WAV, MP3, M4A, OGG, WEBM · до 60 с" data-en="Drag & drop or click. WAV, MP3, M4A, OGG, WEBM · up to 60 s">Перетащите файл или нажмите. WAV, MP3, M4A, OGG, WEBM · до 60 с</div>
         <div id="file-name" style="margin-top:.5rem;color:var(--accent2);font-weight:500"></div>
@@ -462,6 +462,7 @@ let mediaStream = null;
 let audioCtx = null;
 let workletNode = null;
 let liveRunning = false;
+let liveTimerId = null;  // wall-clock timer while recording
 
 const SPRT_ALPHA = 0.001;
 const SPRT_BETA  = 0.05;
@@ -597,7 +598,7 @@ function setLiveStatus(verdict, t_s) {
 
   text.textContent = t(verdict) || verdict;
   sub.textContent  = verdict === 'suspicious' ? '⚠️ ' + (lang === 'ru' ? 'Обнаружен возможный синтез речи' : 'Possible synthetic speech detected') : '';
-  if (t_s !== undefined) timer.textContent = t_s.toFixed(1) + ' с';
+  if (t_s !== undefined && !liveTimerId) timer.textContent = t_s.toFixed(1) + ' с';
 
   if (verdict === 'suspicious') playAlert();
 }
@@ -699,9 +700,14 @@ async function startLive() {
   document.getElementById('btn-start').classList.add('hidden');
   document.getElementById('btn-stop').classList.remove('hidden');
   setLiveStatus('pending', 0);
+  const t0 = performance.now();
+  liveTimerId = setInterval(() => {
+    document.getElementById('live-timer').textContent = ((performance.now() - t0) / 1000).toFixed(1) + ' с';
+  }, 100);
 }
 
 function stopLive(silent = false) {
+  if (liveTimerId) { clearInterval(liveTimerId); liveTimerId = null; }
   if (workletNode) { workletNode.disconnect(); workletNode = null; }
   if (audioCtx)    { audioCtx.close(); audioCtx = null; }
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
