@@ -1,0 +1,78 @@
+# ==========================================
+# Stage 1: Build FFmpeg with AMR support
+# ==========================================
+FROM python:3.11-slim AS ffmpeg-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    yasm \
+    nasm \
+    curl \
+    ca-certificates \
+    libopencore-amrnb-dev \
+    libopencore-amrwb-dev \
+    libvo-amrwbenc-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG FFMPEG_VERSION=6.1.2
+RUN curl -fsSL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz | tar -xJ \
+    && cd ffmpeg-${FFMPEG_VERSION} \
+    && ./configure \
+        --prefix=/opt/ffmpeg \
+        --enable-version3 \
+        --enable-gpl \
+        --enable-nonfree \
+        --enable-libopencore-amrnb \
+        --enable-libopencore-amrwb \
+        --enable-libvo-amrwbenc \
+        --disable-doc \
+        --disable-ffplay \
+        --disable-debug \
+    && make -j$(nproc) \
+    && make install
+
+# ==========================================
+# Stage 2: Final Runtime Image
+# ==========================================
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/ffmpeg/bin:${PATH}"
+
+# Install runtime shared libraries, compilers for C-extensions (webrtcvad), and tools
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    make \
+    libopencore-amrnb0 \
+    libopencore-amrwb0 \
+    libvo-amrwbenc0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv binary
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Copy compiled FFmpeg
+COPY --from=ffmpeg-builder /opt/ffmpeg /opt/ffmpeg
+
+WORKDIR /workspace
+
+# Copy project files
+COPY pyproject.toml README.md Makefile ./
+COPY configs/ ./configs/
+COPY scripts/ ./scripts/
+COPY src/ ./src/
+COPY tests/ ./tests/
+
+# Install all project dependencies
+RUN uv sync --all-groups
+
+ENV PATH="/workspace/.venv/bin:${PATH}"
+
+CMD ["make", "test"]
