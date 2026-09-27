@@ -1,7 +1,7 @@
 """D2: predictive test module (ЧТЗ-05).
 
 Implements FR-01..FR-06:
-- Predictors (logistic regression) on binary symbols
+- Predictors: dissertation MLPs from voiceguard.d2.predictors (ЧТЗ-05)
 - delta = p_hat - 0.5
 - Z-score relative to live-speech reference
 - s2 = max|Z|
@@ -77,32 +77,18 @@ def _compute_delta(
     train_frac: float = 0.8,
     seed: int = 42,
 ) -> float:
-    """Fit logistic regression predictor and return delta = p_hat - 0.5."""
-    from sklearn.linear_model import LogisticRegression
+    """delta = p_hat - 0.5 from the dissertation MLP predictors (ЧТЗ-05).
 
-    X, y = _make_windows(bits, w, mode, direction)
-    n = len(y)
-    if n < 10:
-        return 0.0
+    Thin adapter over voiceguard.d2.predictors.bit_delta / block_delta
+    (MLPClassifier / MLPRegressor, contiguous split, real block mode).
+    Returns NaN when there is not enough data (callers must skip NaN).
+    """
+    from voiceguard.d2.predictors import bit_delta, block_delta
 
-    n_train = min(int(n * train_frac), max_train)
-    X_tr, y_tr = X[:n_train], y[:n_train]
-    X_te, y_te = X[n_train:], y[n_train:]
-
-    if len(np.unique(y_tr)) < 2:
-        return 0.0
-
-    clf = LogisticRegression(max_iter=200, solver="lbfgs", random_state=seed)
-    try:
-        clf.fit(X_tr, y_tr)
-    except Exception:
-        return 0.0
-
-    if len(X_te) == 0:
-        X_te, y_te = X_tr, y_tr
-
-    p_hat = float(clf.score(X_te, y_te))
-    return p_hat - 0.5
+    cfg = load_config(overrides={"d2": {"train_frac": train_frac, "seed": seed}})
+    fn = bit_delta if mode == "bit" else block_delta
+    delta, _n_test = fn(bits, w=w, direction=direction, cfg=cfg, max_train=max_train)
+    return float(delta)
 
 
 def _check_ids(
@@ -175,6 +161,10 @@ def score_segment(
             seed=cfg.d2.seed,
         )
         deltas[check_id] = d
+        if np.isnan(d):
+            z_scores[check_id] = float("nan")
+            chi2_p[check_id] = float("nan")
+            continue
 
         mu0 = reference.mu0.get(check_id, 0.0)
         sigma0 = reference.sigma0.get(check_id, 1.0)
@@ -189,7 +179,7 @@ def score_segment(
 
         chi2_p[check_id] = float(2 * sp_norm.sf(abs(z)))
 
-    s2 = max((abs(v) for v in z_scores.values()), default=0.0)
+    s2 = max((abs(v) for v in z_scores.values() if not np.isnan(v)), default=0.0)
 
     return D2Result(
         delta=deltas,
@@ -308,7 +298,8 @@ def build_reference(
                 train_frac=cfg.d2.train_frac,
                 seed=cfg.d2.seed,
             )
-            all_deltas[check_id].append(d)
+            if not np.isnan(d):
+                all_deltas[check_id].append(d)
 
     mu0: dict[str, float] = {}
     sigma0: dict[str, float] = {}

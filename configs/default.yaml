@@ -41,7 +41,7 @@ fusion:
   sprt_beta: 0.05
   t_max_s: 30
 engine:
-  stream_d2_checks: all   # all | reduced (см. ЧТЗ-09)
+  stream_d2_checks: reduced   # all | reduced (см. ЧТЗ-09)
 paths:
   data: data/
   models: data/models/

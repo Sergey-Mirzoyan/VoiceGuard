@@ -125,18 +125,22 @@ class StreamEngine:
                     w=w,
                     mode=mode,
                     direction=direction,
-                    max_train=2000,  # reduced max_train per spec
+                    max_train=self.cfg.d2.max_train,
                     train_frac=self.cfg.d2.train_frac,
                     seed=self.cfg.d2.seed,
                 )
                 deltas[cid] = d
+                if np.isnan(d):
+                    z_scores[cid] = float("nan")
+                    chi2_p[cid] = float("nan")
+                    continue
                 mu0 = self._d2_ref.mu0.get(cid, 0.0)
                 sigma0 = max(self._d2_ref.sigma0.get(cid, 1.0), 1e-9)
                 z = (d - mu0) / sigma0
                 z_scores[cid] = z
                 chi2_p[cid] = float(2 * np.exp(-0.5 * z**2))  # approx
 
-            s2 = max((abs(v) for v in z_scores.values()), default=0.0)
+            s2 = max((abs(v) for v in z_scores.values() if not np.isnan(v)), default=0.0)
             return D2Result(
                 delta=deltas,
                 z=z_scores,
