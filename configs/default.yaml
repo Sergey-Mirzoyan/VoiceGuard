@@ -22,6 +22,13 @@ d2:
   chi2_max_w: 8
 channels:
   stage0: [clean, g711a, amrnb_12.2, amrnb_4.75, amrwb_12.65, amrnb_12.2+loss3]
+channel:
+  ffmpeg_cmd: "docker run --rm -i voiceguard-base:latest ffmpeg"
+  noise_dir: null
+  loss_model: "independent"  # independent | gilbert_elliott
+  gilbert_elliott:
+    p: 0.05
+    r: 0.5
 fusion:
   sprt_alpha: 0.001       # цель для демо; продуктовая цель 1e-4
   sprt_beta: 0.05

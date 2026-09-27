@@ -55,6 +55,18 @@ class ChannelsCfg(BaseConfigModel):
     )
 
 
+class GilbertElliottCfg(BaseConfigModel):
+    p: float = 0.05
+    r: float = 0.5
+
+
+class ChannelCfg(BaseConfigModel):
+    ffmpeg_cmd: str = "docker run --rm -i voiceguard-base:latest ffmpeg"
+    noise_dir: str | None = None
+    loss_model: str = "independent"
+    gilbert_elliott: GilbertElliottCfg = Field(default_factory=GilbertElliottCfg)
+
+
 class FusionCfg(BaseConfigModel):
     sprt_alpha: float = 0.001
     sprt_beta: float = 0.05
@@ -81,6 +93,7 @@ class Config(BaseConfigModel):
     lpc: LpcCfg = Field(default_factory=LpcCfg)
     d2: D2Cfg = Field(default_factory=D2Cfg)
     channels: ChannelsCfg = Field(default_factory=ChannelsCfg)
+    channel: ChannelCfg = Field(default_factory=ChannelCfg)
     fusion: FusionCfg = Field(default_factory=FusionCfg)
     engine: EngineCfg = Field(default_factory=EngineCfg)
     paths: PathsCfg = Field(default_factory=PathsCfg)
