@@ -13,59 +13,41 @@ VoiceGuard AM — тестовый образец (MVP) системы обна�
 > **Примечание по FFmpeg:**
 > В стандартных пакетах дистрибутива Debian (включая `python:3.11-slim`) пакет ffmpeg собирается без библиотеки `libvo_amrwbenc` из-за лицензионных ограничений. В базовом Docker-образе (`docker/Dockerfile.base`) используется многоэтапная сборка (multi-stage build), где FFmpeg компилируется из исходников с флагами `--enable-version3 --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libvo-amrwbenc`.
 
-## Установка и запуск
+## Запуск демо (MVP)
 
-### 1. Локальная установка
-
-Для автоматической синхронизации виртуального окружения и всех групп зависимостей (`dev`, `ml`, `speech`, `data`, `service`, `ui`):
+### Быстрый старт
 
 ```bash
+# 1. Установить зависимости
 make install
+
+# 2. Загрузить данные (Hy-Generated, 300+300 клипов, ~20-40 мин)
+make data
+
+# 3. Обучить D1, построить эталоны D2, сформировать отчёт этапа 0
+make stage0
+# → Отчёт: reports/stage0/report.md
+# → Модели: data/models/d1_nb.joblib, data/models/d2_ref_*.json
+
+# 4. Запустить сервер
+make demo
+# → Откройте http://localhost:8000
 ```
 
-Команда выполняет `uv sync --all-groups`, создавая `.venv` с Python 3.11 и всеми необходимыми пакетами.
+> **Примечание по каналу amrnb_12.2:** требует Docker с образом `voiceguard-base`
+> (собирается командой `make docker-base`). По умолчанию в UI используется канал `clean`.
 
-### 2. Запуск тестов
+### Эндпоинты API
 
-```bash
-make test
-```
+| Endpoint | Метод | Описание |
+|---|---|---|
+| `/` | GET | Веб-интерфейс |
+| `/v1/analyze` | POST | Загрузка файла (wav/mp3/m4a/ogg/webm, до 60 с) + параметр `channel` |
+| `/v1/stream` | WS | Потоковый PCM16 16 кГц; каждую секунду речи → JSON WindowScore |
+| `/v1/passport` | GET | Паспорт детектора (JSON) |
+| `/v1/health` | GET | Проверка состояния |
 
-### 3. Запуск линтеров
 
-```bash
-make lint
-```
-
-Проверяет код с помощью `ruff check .` и `mypy src`.
-
-### 4. Форматирование кода
-
-```bash
-make fmt
-```
-
-### 5. Проверка FFmpeg
-
-Для проверки наличия необходимых кодеков AMR (NB/WB) в вашей системе:
-
-```bash
-make check-ffmpeg
-```
-
-### 6. Сборка базового Docker-образа
-
-Сборка образа с Python 3.11, скомпилированным FFmpeg (с AMR-NB и AMR-WB энкодерами/декодерами) и всеми зависимостями:
-
-```bash
-make docker-base
-```
-
-Проверка кодеков внутри собранного образа:
-
-```bash
-docker run --rm voiceguard-base:latest make check-ffmpeg
-```
 
 ## Конфигурация
 
