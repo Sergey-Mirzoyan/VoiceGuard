@@ -47,7 +47,7 @@ def test_default_config() -> None:
     assert cfg.fusion.sprt_beta == 0.05
     assert cfg.fusion.t_max_s == 30.0
 
-    assert cfg.engine.stream_d2_checks == "all"
+    assert cfg.engine.stream_d2_checks == "reduced"
     assert cfg.paths.data == "data/"
     assert cfg.paths.models == "data/models/"
     assert cfg.paths.reports == "reports/"
