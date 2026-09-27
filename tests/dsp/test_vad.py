@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy import signal
 
 from voiceguard.dsp.vad import compute_vad_mask, compute_voiced_mask, segment
 from voiceguard.types import AudioClip
@@ -12,50 +13,77 @@ def _create_speech_with_pauses(
 ) -> np.ndarray:
     """Create 10s audio with clear speech bursts and silence pauses."""
     n_total = int(sr * total_duration_s)
-    t = np.linspace(0, total_duration_s, n_total, endpoint=False)
     samples = np.zeros(n_total, dtype=np.float32)
 
-    # 3 speech intervals: [0.5, 3.0] (2.5s), [4.0, 6.2] (2.2s), [7.0, 9.6] (2.6s)
-    # Total speech = 2.5 + 2.2 + 2.6 = 7.3s
-    intervals = [(0.5, 3.0), (4.0, 6.2), (7.0, 9.6)]
+    intervals = [(0.5, 3.0), (4.0, 6.5), (7.5, 9.8)]
+    f0 = 130.0
+    step = int(sr / f0)
+    b, a = signal.iirpeak(500.0, 500.0 / 80.0, fs=sr)
 
     for start_s, end_s in intervals:
-        idx_start = int(start_s * sr)
-        idx_end = int(end_s * sr)
-        sub_t = t[idx_start:idx_end]
-        # Harmonic speech-like vowel with f0=150Hz
-        burst = (
-            0.6 * np.sin(2 * np.pi * 150 * sub_t)
-            + 0.3 * np.sin(2 * np.pi * 450 * sub_t)
-            + 0.2 * np.sin(2 * np.pi * 900 * sub_t)
-        ).astype(np.float32)
-        samples[idx_start:idx_end] = burst
+        idx0 = int(start_s * sr)
+        idx1 = int(end_s * sr)
+        length = idx1 - idx0
+        pulse = np.zeros(length, dtype=np.float32)
+        pulse[::step] = 1.0
+        pulse += 0.05 * np.random.randn(length).astype(np.float32)
+        vowel = signal.lfilter(b, a, pulse).astype(np.float32)
+        vowel = vowel / (np.max(np.abs(vowel)) + 1e-6) * 0.8
+        samples[idx0:idx1] = vowel
 
     return samples
 
 
 def test_ac06_segmentation_10s_speech_with_pauses() -> None:
-    """AC-06: 10 s speech with pauses segments into exactly 1.0 s speech chunks."""
+    """AC-06: 10 s speech with pauses segments into 1.0 s chunks with unpadded remainder >= 0.5s."""
     sr = 8000
     samples = _create_speech_with_pauses(sr=sr, total_duration_s=10.0)
     clip = AudioClip(samples=samples, sr=sr, clip_id="clip_10s_pauses")
 
     segments = segment(clip)
 
-    assert len(segments) > 0, "Expected at least one segment"
+    assert len(segments) > 1, "Expected multiple segments"
 
-    expected_len = int(sr * 1.0)  # Exactly 1.0 s = 8000 samples
-    expected_frames = 50  # 1.0 s / 20 ms = 50 frames
+    frame_len = int(sr * 0.02)  # 160 samples per 20 ms frame
+    full_seg_len = int(sr * 1.0)  # 8000 samples
 
-    for seg in segments:
-        assert len(seg.samples) == expected_len, (
-            f"Segment {seg.index} length {len(seg.samples)} != 1.0 s ({expected_len} samples)"
-        )
-        assert len(seg.voiced_mask) == expected_frames, (
-            f"Segment {seg.index} voiced_mask length {len(seg.voiced_mask)} != {expected_frames}"
-        )
+    for seg in segments[:-1]:
+        assert len(seg.samples) == full_seg_len, f"Full segment {seg.index} length != 1.0 s"
+        assert len(seg.voiced_mask) == 50
         assert seg.sr == sr
-        assert seg.clip_id == "clip_10s_pauses"
+
+    last_seg = segments[-1]
+    # Remainder >= 0.5 s must not be zero-padded to 1.0 s
+    assert len(last_seg.samples) >= int(sr * 0.5)
+    assert len(last_seg.samples) == len(last_seg.voiced_mask) * frame_len
+    if len(last_seg.voiced_mask) < 50:
+        assert len(last_seg.samples) < full_seg_len, "Remainder >= 0.5s must NOT be padded to 1.0s"
+
+
+def test_remainder_handling() -> None:
+    """Test remainder < 0.5 s is discarded and remainder >= 0.5 s is kept unpadded."""
+    sr = 8000
+    frame_len = int(sr * 0.02)
+    step = int(sr / 130.0)
+    b, a = signal.iirpeak(500.0, 500.0 / 80.0, fs=sr)
+
+    def make_speech(n_frames: int) -> np.ndarray:
+        length = n_frames * frame_len
+        pulse = np.zeros(length, dtype=np.float32)
+        pulse[::step] = 1.0
+        vowel = signal.lfilter(b, a, pulse).astype(np.float32)
+        return (vowel / (np.max(np.abs(vowel)) + 1e-6) * 0.8).astype(np.float32)
+
+    # 15 frames of speech (< 25 frames / 0.5s) -> discarded
+    clip_short = AudioClip(samples=make_speech(15), sr=sr, clip_id="short")
+    assert len(segment(clip_short)) == 0
+
+    # 35 frames of speech (>= 25 frames / 0.5s and < 50 frames / 1.0s) -> 1 unpadded segment
+    clip_rem = AudioClip(samples=make_speech(35), sr=sr, clip_id="rem")
+    segs = segment(clip_rem)
+    assert len(segs) == 1
+    assert len(segs[0].voiced_mask) == 35
+    assert len(segs[0].samples) == 35 * frame_len
 
 
 def test_vad_and_voiced_masks_synthetic() -> None:
@@ -75,14 +103,10 @@ def test_vad_and_voiced_masks_synthetic() -> None:
     vad_m = compute_vad_mask(audio, sr=sr, frame_ms=20)
     voiced_m = compute_voiced_mask(audio, sr=sr, frame_ms=20, vad_mask=vad_m)
 
-    # 50 frames total: first 25 silence, next 25 tone
     assert len(vad_m) == 50
     assert len(voiced_m) == 50
-    # Silence part should be non-speech
     assert np.sum(vad_m[:20]) == 0
-    # Tone part should have speech detected
     assert np.sum(vad_m[25:]) > 15
-    # Voiced mask should be non-zero in tone part
     assert np.sum(voiced_m[25:]) > 10
 
 

@@ -141,12 +141,7 @@ def segment(
         ]
         cur_voiced = voiced_mask[cur_frame_indices]
 
-        # If remainder is >= 0.5 s, pad to exactly 1.0 s (frames_per_seg) with silence
-        if cur_count < frames_per_seg:
-            missing = frames_per_seg - cur_count
-            pad_frames = [np.zeros(frame_len, dtype=np.float32) for _ in range(missing)]
-            frame_blocks.extend(pad_frames)
-            cur_voiced = np.pad(cur_voiced, (0, missing), constant_values=False)
+        # Remainder >= 0.5 s is kept as shorter segment without zero padding
 
         seg_samples = np.concatenate(frame_blocks).astype(np.float32)
         segments.append(
