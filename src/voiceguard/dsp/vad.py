@@ -89,8 +89,7 @@ def segment(
     clip: AudioClip,
     cfg: Config | None = None,
 ) -> list[Segment]:
-    """Segment an audio clip into 1.0 s segments of concatenated speech frames with VAD voicing.
-    """
+    """Segment an audio clip into 1.0 s segments of concatenated speech frames with VAD voicing."""
     if cfg is None:
         cfg = load_config()
 

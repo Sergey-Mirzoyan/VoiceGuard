@@ -12,14 +12,21 @@ lpc:
   window: hamming
 d2:
   windows: [8, 16, 32]
+  windows_B: [4, 8, 16]
   directions: [fwd, bwd]
   modes: [bit, block]
   train_frac: 0.8         # непрерывное разбиение 80/20
   max_train: 5000         # ограничение обучающей выборки
   mlp_lr: 0.001
+  max_iter: 200
   seed: 42
   alpha: 0.01             # уровень значимости одиночного вердикта D2
   chi2_max_w: 8
+  chi2_orders: [2, 4, 6]
+  n_jobs: 4
+  segment_B_s: 5.0
+  reference:
+    robust: false
 channels:
   stage0: [clean, g711a, amrnb_12.2, amrnb_4.75, amrwb_12.65, amrnb_12.2+loss3]
 channel:

@@ -30,16 +30,26 @@ class LpcCfg(BaseConfigModel):
     window: str = "hamming"
 
 
+class ReferenceCfg(BaseConfigModel):
+    robust: bool = False
+
+
 class D2Cfg(BaseConfigModel):
     windows: list[int] = Field(default_factory=lambda: [8, 16, 32])
+    windows_B: list[int] = Field(default_factory=lambda: [4, 8, 16])
     directions: list[str] = Field(default_factory=lambda: ["fwd", "bwd"])
     modes: list[str] = Field(default_factory=lambda: ["bit", "block"])
     train_frac: float = 0.8
     max_train: int = 5000
     mlp_lr: float = 0.001
+    max_iter: int = 200
     seed: int = 42
     alpha: float = 0.01
     chi2_max_w: int = 8
+    chi2_orders: list[int] = Field(default_factory=lambda: [2, 4, 6])
+    n_jobs: int = 4
+    segment_B_s: float = 5.0
+    reference: ReferenceCfg = Field(default_factory=ReferenceCfg)
 
 
 class ChannelsCfg(BaseConfigModel):

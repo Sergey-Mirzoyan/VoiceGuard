@@ -40,8 +40,7 @@ def plot_inspection_pil(
     out_path: Path,
     cfg: Config | None = None,
 ) -> Path:
-    """Draw a 4-panel inspection plot (waveform, residual, VAD/voicing, pitch contour) and save PNG.
-    """
+    """Draw 4-panel inspection plot (waveform, residual, VAD, pitch) and save PNG."""
     if cfg is None:
         cfg = load_config()
 
