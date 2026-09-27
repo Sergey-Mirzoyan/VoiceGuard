@@ -54,7 +54,7 @@ def run_stage0(
     import pandas as pd
     import soundfile as sf
 
-    from voiceguard.d1.detector import load_model, predict_logit, segment_features, train
+    from voiceguard.d1.detector import load_model, predict_logit, train
     from voiceguard.d2.detector import Reference, build_reference, score_segment
     from voiceguard.dsp.vad import segment as do_segment
     from voiceguard.types import AudioClip
@@ -73,7 +73,9 @@ def run_stage0(
         samples = samples.astype(np.float32)
         if samples.ndim > 1:
             samples = samples.mean(axis=1)
-        return AudioClip(samples=samples, sr=sr, clip_id=row["clip_id"], meta={"label": row["label"]})
+        return AudioClip(
+            samples=samples, sr=sr, clip_id=row["clip_id"], meta={"label": row["label"]}
+        )
 
     def _clips_for_split(split: str, label: str | None = None) -> list[tuple[AudioClip, str]]:
         sub = df[df["split"] == split]
@@ -147,7 +149,7 @@ def run_stage0(
             for s in calib_segs_live:
                 try:
                     clip = AudioClip(samples=s.samples, sr=s.sr, clip_id=s.clip_id)
-                    aug_clip = apply(clip, spec)
+                    aug_clip = apply(clip, spec, seed=42)
                     new_segs = do_segment(aug_clip, cfg)
                     aug_segs.extend(new_segs)
                 except Exception as e:
@@ -169,8 +171,8 @@ def run_stage0(
     metrics: dict[str, Any] = {}
 
     for ch in channels:
-        ref = refs.get(ch)
-        if ref is None:
+        ref_eval = refs.get(ch)
+        if ref_eval is None:
             continue
 
         logger.info("Evaluating on channel '%s', %d test segments", ch, len(test_pairs))
@@ -188,7 +190,7 @@ def run_stage0(
             except Exception:
                 s1_scores.append(0.0)
             try:
-                d2 = score_segment(seg, ref, cfg)
+                d2 = score_segment(seg, ref_eval, cfg)
                 s2_scores.append(d2.s2)
             except Exception:
                 s2_scores.append(0.0)
@@ -208,7 +210,7 @@ def run_stage0(
         # Fusion D1+D2 via logistic regression on calib
         calib_pairs = _segs_for_split("calib")
         fusion_auc, fusion_eer = _fusion_metrics(
-            calib_pairs, test_pairs, d1_model, ref, cfg, ch
+            calib_pairs, test_pairs, d1_model, ref_eval, cfg, ch
         )
 
         metrics[ch] = {
@@ -299,8 +301,6 @@ def _write_report(metrics: dict[str, Any], channels: list[str], reports_dir: Pat
         "|-------|--------|--------|--------|--------|-----------|-----------|--------|",
     ]
 
-    g1_passed = True
-
     for ch in channels:
         m = metrics.get(ch)
         if m is None:
@@ -317,9 +317,6 @@ def _write_report(metrics: dict[str, Any], channels: list[str], reports_dir: Pat
             f"| {m['n_test']} |"
         )
         lines.append(row)
-        # G1: D1 AUC >= 0.65 on at least one channel
-        if m["d1_auc"] < 0.65:
-            g1_passed = False
 
     lines += [
         "",

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 
@@ -112,7 +112,9 @@ def _check_ids(
     return ids
 
 
-def _parse_check_id(check_id: str) -> tuple[str, str, int, str]:
+def _parse_check_id(
+    check_id: str,
+) -> tuple[str, Literal["bit", "block"], int, Literal["fwd", "bwd"]]:
     """Parse check_id into (variant, mode, w, direction)."""
     parts = check_id.split("_")
     # Format: {variant}_{mode}_w{w}_{dir}
@@ -121,9 +123,9 @@ def _parse_check_id(check_id: str) -> tuple[str, str, int, str]:
     # w: parts[2][1:] (strip 'w')
     # dir: parts[3]
     variant = parts[0]
-    mode = parts[1]
+    mode = cast(Literal["bit", "block"], parts[1])
     w = int(parts[2][1:])
-    direction = parts[3]
+    direction = cast(Literal["fwd", "bwd"], parts[3])
     return variant, mode, w, direction
 
 
@@ -134,7 +136,7 @@ def _parse_check_id(check_id: str) -> tuple[str, str, int, str]:
 
 def score_segment(
     seg: Segment,
-    reference: "Reference",
+    reference: Reference,
     cfg: Config | None = None,
 ) -> D2Result:
     """Compute D2Result for one segment using a fitted Reference."""
@@ -173,8 +175,6 @@ def score_segment(
         z = (d - mu0) / sigma0
         z_scores[check_id] = z
 
-        # Simple chi2 via binomial approximation (FR-04)
-        n_test = max(1, int(len(bits) * (1 - cfg.d2.train_frac)))
         from scipy.stats import norm as sp_norm
 
         chi2_p[check_id] = float(2 * sp_norm.sf(abs(z)))
@@ -241,7 +241,7 @@ class Reference:
         logger.info("Reference saved to %s", path)
 
     @classmethod
-    def load(cls, path: str | Path) -> "Reference":
+    def load(cls, path: str | Path) -> Reference:
         with open(path) as f:
             d = json.load(f)
         return cls(
@@ -307,7 +307,7 @@ def build_reference(
         vals = all_deltas[cid]
         if vals:
             mu0[cid] = float(np.mean(vals))
-            sigma0[cid] = float(max(np.std(vals), 1e-6))
+            sigma0[cid] = float(max(float(np.std(vals)), 1e-6))
         else:
             mu0[cid] = 0.0
             sigma0[cid] = 1.0

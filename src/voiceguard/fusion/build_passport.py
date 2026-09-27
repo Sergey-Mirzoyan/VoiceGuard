@@ -5,11 +5,10 @@ import json
 import logging
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
 from voiceguard.fusion.calibrator import LLRCalibrator, build_passport
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     # Load existing metrics if available
     metrics_path = Path("reports/stage0/metrics.json")
     if metrics_path.exists():

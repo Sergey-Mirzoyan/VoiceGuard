@@ -22,7 +22,14 @@ import soundfile as sf
 logger = logging.getLogger(__name__)
 
 # Dataset parameters
-DATASET_NAME = "Yerazank/hy-generated"
+DATASET_NAME = "ErikMkrtchyan/Hy-Generated-audio-data-with-cv20.0"
+# The dataset has no label column: the class is given by the split.
+# train/test/eval are Common Voice 20.0 (live), generated is F5-TTS (spoof).
+LIVE_SPLITS = ("train", "test", "eval")
+SPOOF_SPLIT = "generated"
+# Common Voice rows are grouped by speaker; cap clips per speaker so the
+# speaker-level calib/train/test split has enough distinct speakers.
+MAX_CLIPS_PER_SPEAKER = 5
 CLIPS_PER_CLASS = 300
 TARGET_SR = 16000
 SPLIT_CALIB = 0.30
@@ -35,31 +42,35 @@ def _resample_to_16k(samples: np.ndarray, orig_sr: int) -> np.ndarray:
     if orig_sr == TARGET_SR:
         return samples.astype(np.float32)
     try:
-        from scipy.signal import resample_poly
         from math import gcd
+
+        from scipy.signal import resample_poly
 
         g = gcd(TARGET_SR, orig_sr)
         up = TARGET_SR // g
         down = orig_sr // g
         resampled = resample_poly(samples.astype(np.float64), up, down)
-        return resampled.astype(np.float32)
+        return np.asarray(resampled, dtype=np.float32)
     except Exception as exc:
         logger.warning("Resample failed (%s), using librosa", exc)
         import librosa
 
-        return librosa.resample(samples.astype(np.float32), orig_sr=orig_sr, target_sr=TARGET_SR)
+        return np.asarray(
+            librosa.resample(samples.astype(np.float32), orig_sr=orig_sr, target_sr=TARGET_SR),
+            dtype=np.float32,
+        )
 
 
 def _to_mono(samples: np.ndarray) -> np.ndarray:
     """Convert to mono by averaging channels."""
     if samples.ndim == 1:
         return samples
-    return samples.mean(axis=1)
+    return np.asarray(samples.mean(axis=1), dtype=np.float32)
 
 
 def _speaker_id_from_meta(row: dict[str, Any]) -> str:
     """Extract or derive speaker ID from dataset row metadata."""
-    for key in ("speaker_id", "speaker", "spk_id", "spk"):
+    for key in ("speaker_id", "client_id", "speaker", "spk_id", "spk"):
         val = row.get(key)
         if val is not None:
             return str(val)
@@ -128,42 +139,34 @@ def build_manifest(
 
     rows: list[dict[str, Any]] = []
     counts: dict[str, int] = {"live": 0, "spoof": 0}
+    per_speaker: dict[str, int] = {}
 
-    try:
-        ds = load_dataset(DATASET_NAME, split="train", streaming=True, trust_remote_code=True)
-    except Exception:
-        # Try without split param
-        ds = load_dataset(DATASET_NAME, streaming=True, trust_remote_code=True)
-        # Take first available split
-        if hasattr(ds, "keys"):
-            first_split = list(ds.keys())[0]
-            ds = ds[first_split]
+    def _labelled_rows() -> Any:
+        """Interleave live and spoof rows so both classes fill up together."""
+        live = (
+            row
+            for split in LIVE_SPLITS
+            for row in load_dataset(DATASET_NAME, split=split, streaming=True)
+        )
+        spoof = iter(load_dataset(DATASET_NAME, split=SPOOF_SPLIT, streaming=True))
+        sources = [("live", live), ("spoof", spoof)]
+        while sources:
+            for item in list(sources):
+                label, it = item
+                try:
+                    yield label, next(it)
+                except StopIteration:
+                    sources.remove(item)
 
-    for row in ds:
+    for label, row in _labelled_rows():
         if counts["live"] >= n_per_class and counts["spoof"] >= n_per_class:
             break
 
-        # Determine label
-        label_raw = row.get("label", row.get("is_genuine", row.get("is_live", None)))
-        if label_raw is None:
-            # Try text label
-            label_str = str(row.get("label_str", row.get("class", ""))).lower()
-            if label_str in ("live", "genuine", "real", "bona_fide", "bonafide", "1"):
-                label = "live"
-            elif label_str in ("spoof", "synthetic", "fake", "0"):
-                label = "spoof"
-            else:
-                continue
-        else:
-            if isinstance(label_raw, bool):
-                label = "live" if label_raw else "spoof"
-            elif isinstance(label_raw, int):
-                # Common: 1=live/genuine, 0=spoof
-                label = "live" if label_raw == 1 else "spoof"
-            else:
-                label = "live" if str(label_raw).lower() in ("live", "genuine", "real") else "spoof"
-
         if counts[label] >= n_per_class:
+            continue
+
+        spk = _speaker_id_from_meta(row)
+        if per_speaker.get(spk, 0) >= MAX_CLIPS_PER_SPEAKER:
             continue
 
         # Extract audio
@@ -194,7 +197,6 @@ def build_manifest(
         if peak > 0:
             samples = samples / peak * 0.9
 
-        spk = _speaker_id_from_meta(row)
         clip_id = f"{label}_{counts[label]:04d}"
         flac_path = audio_dir / f"{clip_id}.flac"
 
@@ -216,6 +218,7 @@ def build_manifest(
             }
         )
         counts[label] += 1
+        per_speaker[spk] = per_speaker.get(spk, 0) + 1
         if counts[label] % 50 == 0:
             logger.info("Collected %d %s clips", counts[label], label)
 

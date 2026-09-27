@@ -148,8 +148,7 @@ module = [
     "sklearn.*",
     "pandas.*",
     "joblib.*",
-    "multipart.*",
     "datasets.*",
-    "huggingface_hub.*",
+    "pyarrow.*",
 ]
 ignore_missing_imports = true

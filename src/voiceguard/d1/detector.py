@@ -30,7 +30,9 @@ N_FILTERS = 40
 # ---------------------------------------------------------------------------
 
 
-def _lfcc_frame(frame: np.ndarray, sr: int, n_lfcc: int = N_LFCC, n_filters: int = N_FILTERS) -> np.ndarray:
+def _lfcc_frame(
+    frame: np.ndarray, sr: int, n_lfcc: int = N_LFCC, n_filters: int = N_FILTERS
+) -> np.ndarray:
     """Compute LFCC for a single frame using linear filter bank (not mel)."""
     n = len(frame)
     if n == 0:
@@ -67,7 +69,7 @@ def _lfcc_frame(frame: np.ndarray, sr: int, n_lfcc: int = N_LFCC, n_filters: int
     from scipy.fft import dct
 
     lfcc = dct(log_energy, type=2, n=n_lfcc, norm="ortho")
-    return lfcc
+    return np.asarray(lfcc, dtype=np.float64)
 
 
 def extract_lfcc(
@@ -129,7 +131,7 @@ def _augment_segment(seg: Segment, channels: list[str]) -> list[tuple[Segment, s
             from voiceguard.types import AudioClip
 
             clip = AudioClip(samples=seg.samples, sr=seg.sr, clip_id=f"{seg.clip_id}_aug")
-            aug_clip = apply(clip, spec)
+            aug_clip = apply(clip, spec, seed=42)
             from voiceguard.dsp.vad import segment as seg_fn
 
             aug_segs = seg_fn(aug_clip)

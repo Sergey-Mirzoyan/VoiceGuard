@@ -1,3 +1,7 @@
+# .pth files in .venv may get the macOS "hidden" flag and be skipped by Python
+export PYTHONPATH := $(CURDIR)/src
+
+
 UV := $(shell which uv 2>/dev/null)
 
 ifeq ($(UV),)
@@ -39,11 +43,11 @@ docker-base:
 
 # Download dataset and build manifest
 data:
-	$(PYTHON) -m voiceguard.data.loader
+	$(PYTHON) -m voiceguard.data
 
 # Run stage 0 experiment (train D1, build D2 refs, evaluate, report)
 stage0:
-	$(PYTHON) -m voiceguard.experiments.stage0
+	$(PYTHON) -m voiceguard.experiments
 
 # Build passport from stage0 results
 passport:

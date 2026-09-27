@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 from typing import Any
 
-import joblib  # type: ignore[import-untyped]
+import joblib
 import numpy as np
 from scipy import stats
 from sklearn.neural_network import MLPClassifier, MLPRegressor
